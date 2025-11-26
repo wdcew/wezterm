@@ -33,10 +33,6 @@ use config::keyassignment::{
     Confirmation, KeyAssignment, LauncherActionArgs, PaneDirection, Pattern, PromptInputLine,
     QuickSelectArguments, RotationDirection, SpawnCommand, SplitSize,
 };
-use config::keyassignment::{
-    KeyAssignment, PaneDirection, Pattern, PromptInputLine, QuickSelectArguments, SpawnCommand,
-    SplitSize,
-};
 use config::window::WindowLevel;
 use config::{
     configuration, AudibleBell, ConfigHandle, Dimension, DimensionContext, FrontEndSelection,
@@ -1301,7 +1297,7 @@ impl TermWindow {
                 MuxNotification::SaveToDownloads { .. } => {
                     // Handled by frontend
                 }
-                MuxNotification::PaneFocused(_) => {
+                MuxNotification::PaneFocused { .. } => {
                     // Also handled by clientpane
                     self.update_title_post_status();
                 }
@@ -1468,7 +1464,7 @@ impl TermWindow {
                     | Alert::SetUserVar { .. }
                     | Alert::Bell,
             }
-            | MuxNotification::PaneFocused(pane_id)
+            | MuxNotification::PaneFocused { pane_id, .. }
             | MuxNotification::PaneRemoved(pane_id)
             | MuxNotification::PaneOutput(pane_id) => {
                 // Ideally we'd check to see if pane_id is part of this window,
