@@ -2,7 +2,7 @@ use crate::quad::{
     QuadImpl, QuadTrait, TripleLayerQuadAllocator, TripleLayerQuadAllocatorTrait, V_BOT_LEFT,
     V_BOT_RIGHT, V_TOP_LEFT, V_TOP_RIGHT,
 };
-use config::HsbTransform;
+use config::{CursorTrailConfig, HsbTransform};
 use mux::renderable::StableCursorPosition;
 use std::ops::Range;
 use std::time::Instant;
@@ -13,20 +13,104 @@ use window::color::LinearRgba;
 /// Distance threshold for considering corners "at cursor"
 const SETTLED_THRESHOLD: f32 = 0.1;
 
+/// A screen position in f32 coordinates
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+struct Pos {
+    x: f32,
+    y: f32,
+}
+impl From<StableCursorPosition> for Pos {
+    fn from(p: StableCursorPosition) -> Self {
+        Pos {
+            x: p.x as f32,
+            y: p.y as f32,
+        }
+    }
+}
+
+/// The vertices for the trail quad
+#[derive(Debug, Default)]
+struct TrailQuad([Pos; 4]);
+
+impl std::ops::Index<usize> for TrailQuad {
+    type Output = Pos;
+    fn index(&self, idx: usize) -> &Self::Output {
+        &self.0[idx]
+    }
+}
+
+impl std::ops::IndexMut<usize> for TrailQuad {
+    fn index_mut(&mut self, idx: usize) -> &mut Self::Output {
+        &mut self.0[idx]
+    }
+}
+
+impl TrailQuad {
+    fn at(p: Pos) -> Self {
+        Self([
+            Pos { x: p.x, y: p.y },
+            Pos { x: p.x + 1.0, y: p.y },
+            Pos { x: p.x + 1.0, y: p.y + 1.0 },
+            Pos { x: p.x, y: p.y + 1.0 },
+        ])
+    }
+}
+
+/// The edges to animate a TrailQuad towards
+#[derive(Debug, Default)]
+struct TrailTarget {
+    top: f32,
+    bottom: f32,
+    left: f32,
+    right: f32,
+}
+impl TrailTarget {
+    fn at(p: Pos) -> Self {
+        Self {
+            top: p.y,
+            bottom: p.y + 1.0,
+            left: p.x,
+            right: p.x + 1.0,
+        }
+    }
+}
+
+/// Info needed to update the CursorTrail state
+pub struct TickContext {
+    cursor_pos: Pos,
+    now: Instant,
+    distance_threshold: f32,
+    decay_fast: f32,
+    decay_slow: f32,
+    dwell_treshold: u64,
+}
+
+impl TickContext {
+    pub fn from_cursor(cursor_pos: StableCursorPosition, trail_config: &CursorTrailConfig) -> Self {
+        let float_dur = trail_config.duration as f32;
+        Self {
+            cursor_pos: cursor_pos.into(),
+            now: Instant::now(), // todo secs and such or take reference?
+            distance_threshold: trail_config.distance_threshold as f32,
+            decay_fast: float_dur / 1000.0,
+            decay_slow: (float_dur * trail_config.spread) / 1000.0,
+            dwell_treshold: trail_config.dwell_threshold,
+        }
+    }
+}
+
 /// Manages the cursor trail effect with a deformable quad
 #[derive(Debug)]
 pub struct CursorTrail {
     /// Four corners of the trail quad: top-left, top-right, bottom-right, bottom-left
-    corners: [(f32, f32); 4],
+    quad: TrailQuad,
 
     /// Trail target bounds (where corners are animating towards)
-    target_left: f32,
-    target_right: f32,
-    target_top: f32,
-    target_bottom: f32,
+    // todo: structify
+    target: TrailTarget,
 
-    /// Current cursor position
-    cursor_pos: Option<StableCursorPosition>,
+    /// Last cursor position
+    last_cursor_pos: Pos,
 
     /// When the cursor last moved to a new position
     cursor_last_moved: Instant,
@@ -39,99 +123,66 @@ impl CursorTrail {
     pub fn new() -> Self {
         let now = Instant::now();
         Self {
-            corners: [(0.0, 0.0); 4],
-            target_left: 0.0,
-            target_right: 0.0,
-            target_top: 0.0,
-            target_bottom: 0.0,
-            cursor_pos: None,
+            quad: TrailQuad::default(),
+            target: TrailTarget::default(),
+            last_cursor_pos: Pos::default(),
             cursor_last_moved: now,
             updated_at: now,
         }
     }
 
     /// Update the trail state and return true if the quad should be rendered.
-    pub fn update(
-        &mut self,
-        cursor_pos: &StableCursorPosition,
-        min_distance: f32,
-        decay_fast: f32,
-        decay_slow: f32,
-        dwell_time_ms: u64,
-    ) -> bool {
-        let now = Instant::now();
-        let delta_time = now.duration_since(self.updated_at).as_secs_f32();
-        self.updated_at = now;
+    pub fn tick(&mut self, ctx: TickContext) -> bool {
+        let delta_time = ctx.now.duration_since(self.updated_at).as_secs_f32();
+        self.updated_at = ctx.now;
 
-        let cursor_x = cursor_pos.x as f32;
-        let cursor_y = cursor_pos.y as f32;
-
-        if self
-            .cursor_pos
-            .as_ref()
-            .map_or(true, |last_pos| last_pos != cursor_pos)
-        {
-            self.cursor_last_moved = now;
-            self.cursor_pos = Some(*cursor_pos);
+        if self.last_cursor_pos != ctx.cursor_pos {
+            self.cursor_last_moved = ctx.now;
+            self.last_cursor_pos = ctx.cursor_pos;
         }
 
-        let dwell_time = now.duration_since(self.cursor_last_moved).as_millis() as u64;
-        let target_to_cursor_distance =
-            (cursor_x - self.target_left).abs() + (cursor_y - self.target_top).abs();
+        let dwell_time = ctx.now.duration_since(self.cursor_last_moved).as_millis() as u64;
+        // todo: rename to just cursor_distance
+        let target_to_cursor_distance = (ctx.cursor_pos.x - self.target.left).abs()
+            + (ctx.cursor_pos.y - self.target.top).abs();
 
-        if dwell_time >= dwell_time_ms && target_to_cursor_distance > min_distance {
-            self.target_left = cursor_x;
-            self.target_right = cursor_x + 1.0;
-            self.target_top = cursor_y;
-            self.target_bottom = cursor_y + 1.0;
+        if dwell_time >= ctx.dwell_treshold && target_to_cursor_distance > ctx.distance_threshold {
+            self.target = TrailTarget::at(ctx.cursor_pos);
         }
 
-        if self.target_left == 0.0 && self.target_right == 0.0 {
-            self.target_left = cursor_x;
-            self.target_right = cursor_x + 1.0;
-            self.target_top = cursor_y;
-            self.target_bottom = cursor_y + 1.0;
-            self.corners = [
-                (cursor_x, cursor_y),
-                (cursor_x + 1.0, cursor_y),
-                (cursor_x + 1.0, cursor_y + 1.0),
-                (cursor_x, cursor_y + 1.0),
-            ];
+        // first update
+        // TODO: better logic
+        if self.target.left == 0.0 && self.target.right == 0.0 {
+            self.target = TrailTarget::at(ctx.cursor_pos);
+            self.quad = TrailQuad::at(ctx.cursor_pos);
             return false;
         }
 
-        if target_to_cursor_distance > 0.0 && target_to_cursor_distance <= min_distance {
-            self.corners = [
-                (cursor_x, cursor_y),
-                (cursor_x + 1.0, cursor_y),
-                (cursor_x + 1.0, cursor_y + 1.0),
-                (cursor_x, cursor_y + 1.0),
-            ];
-            self.target_left = cursor_x;
-            self.target_right = cursor_x + 1.0;
-            self.target_top = cursor_y;
-            self.target_bottom = cursor_y + 1.0;
+        if target_to_cursor_distance > 0.0 && target_to_cursor_distance <= ctx.distance_threshold {
+            self.target = TrailTarget::at(ctx.cursor_pos);
+            self.quad = TrailQuad::at(ctx.cursor_pos);
+
             return false;
         }
 
         // Animate corners towards target using exponential ease-out
         let target_x = [
-            self.target_left,
-            self.target_right,
-            self.target_right,
-            self.target_left,
+            self.target.left,
+            self.target.right,
+            self.target.right,
+            self.target.left,
         ];
         let target_y = [
-            self.target_top,
-            self.target_top,
-            self.target_bottom,
-            self.target_bottom,
+            self.target.top,
+            self.target.top,
+            self.target.bottom,
+            self.target.bottom,
         ];
 
-        let target_center_x = (self.target_left + self.target_right) * 0.5;
-        let target_center_y = (self.target_top + self.target_bottom) * 0.5;
-        let target_width = self.target_right - self.target_left;
-        let target_height = self.target_bottom - self.target_top;
+        let target_center_x = (self.target.left + self.target.right) * 0.5;
+        let target_center_y = (self.target.top + self.target.bottom) * 0.5;
+        let target_width = self.target.right - self.target.left;
+        let target_height = self.target.bottom - self.target.top;
         let target_diag_2 = (target_width.powi(2) + target_height.powi(2)).sqrt() * 0.5;
 
         let mut dx = [0.0_f32; 4];
@@ -139,8 +190,8 @@ impl CursorTrail {
         let mut dot = [0.0_f32; 4];
 
         for i in 0..4 {
-            dx[i] = target_x[i] - self.corners[i].0;
-            dy[i] = target_y[i] - self.corners[i].1;
+            dx[i] = target_x[i] - self.quad[i].x;
+            dy[i] = target_y[i] - self.quad[i].y;
 
             if dx[i].abs() < 1e-6 && dy[i].abs() < 1e-6 {
                 dx[i] = 0.0;
@@ -164,35 +215,36 @@ impl CursorTrail {
             }
 
             let decay = if (max_dot - min_dot).abs() < 1e-6 {
-                decay_slow
+                ctx.decay_slow
             } else {
-                decay_slow + (decay_fast - decay_slow) * (dot[i] - min_dot) / (max_dot - min_dot)
+                ctx.decay_slow
+                    + (ctx.decay_fast - ctx.decay_slow) * (dot[i] - min_dot) / (max_dot - min_dot)
             };
 
             let step = 1.0 - 2.0_f32.powf(-10.0 * delta_time / decay);
-            self.corners[i].0 += dx[i] * step;
-            self.corners[i].1 += dy[i] * step;
+            self.quad[i].x += dx[i] * step;
+            self.quad[i].y += dy[i] * step;
         }
 
         let waiting_for_dwell =
-            target_to_cursor_distance > min_distance && dwell_time < dwell_time_ms;
+            target_to_cursor_distance > ctx.distance_threshold && dwell_time < ctx.dwell_treshold;
         !self.settled(SETTLED_THRESHOLD) || waiting_for_dwell
     }
 
     fn settled(&self, threshold: f32) -> bool {
         for i in 0..4 {
             let target_x = if i == 1 || i == 2 {
-                self.target_right
+                self.target.right
             } else {
-                self.target_left
+                self.target.left
             };
             let target_y = if i >= 2 {
-                self.target_bottom
+                self.target.bottom
             } else {
-                self.target_top
+                self.target.top
             };
-            let dx = target_x - self.corners[i].0;
-            let dy = target_y - self.corners[i].1;
+            let dx = target_x - self.quad[i].x;
+            let dy = target_y - self.quad[i].y;
             if dx.abs() > threshold || dy.abs() > threshold {
                 return false;
             }
@@ -222,20 +274,20 @@ impl CursorTrail {
 
         let pixel_corners = [
             [
-                px_x + (self.corners[0].0 - pane_left as f32) * cell_width,
-                px_y + (self.corners[0].1 - stable_range.start as f32) * cell_height,
+                px_x + (self.quad[0].x - pane_left as f32) * cell_width,
+                px_y + (self.quad[0].y - stable_range.start as f32) * cell_height,
             ],
             [
-                px_x + (self.corners[1].0 - pane_left as f32) * cell_width,
-                px_y + (self.corners[1].1 - stable_range.start as f32) * cell_height,
+                px_x + (self.quad[1].x - pane_left as f32) * cell_width,
+                px_y + (self.quad[1].y - stable_range.start as f32) * cell_height,
             ],
             [
-                px_x + (self.corners[3].0 - pane_left as f32) * cell_width,
-                px_y + (self.corners[3].1 - stable_range.start as f32) * cell_height,
+                px_x + (self.quad[3].x - pane_left as f32) * cell_width,
+                px_y + (self.quad[3].y - stable_range.start as f32) * cell_height,
             ],
             [
-                px_x + (self.corners[2].0 - pane_left as f32) * cell_width,
-                px_y + (self.corners[2].1 - stable_range.start as f32) * cell_height,
+                px_x + (self.quad[2].x - pane_left as f32) * cell_width,
+                px_y + (self.quad[2].y - stable_range.start as f32) * cell_height,
             ],
         ];
 

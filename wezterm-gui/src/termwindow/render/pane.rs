@@ -1,6 +1,7 @@
 use crate::quad::{HeapQuadAllocator, QuadTrait, TripleLayerQuadAllocator};
 use crate::selection::SelectionRange;
 use crate::termwindow::box_model::*;
+use crate::termwindow::cursor_trail::TickContext;
 use crate::termwindow::render::{
     same_hyperlink, CursorProperties, LineQuadCacheKey, LineQuadCacheValue, LineToEleShapeCacheKey,
     RenderScreenLineParams,
@@ -570,20 +571,14 @@ impl crate::TermWindow {
                 return Err(error).context("error while calling with_lines_mut");
             }
 
-            // Update and render cursor trail (if enabled)
-            // TODO: cleaner to move into cursor_trail.rs?
-            if config.cursor_trail.enabled && pos.is_active {
-                let decay_fast = config.cursor_trail.duration as f32 / 1000.0;
-                let decay_slow =
-                    (config.cursor_trail.duration as f32 * config.cursor_trail.spread) / 1000.0;
+            //self.cursor_trail.update2();
 
-                if self.cursor_trail.update(
-                    &pos.pane.get_cursor_position(),
-                    config.cursor_trail.distance_threshold as f32,
-                    decay_fast,
-                    decay_slow,
-                    config.cursor_trail.dwell_threshold,
-                ) {
+            // Update and render cursor trail (if enabled)
+            if config.cursor_trail.enabled && pos.is_active {
+                if self.cursor_trail.tick(TickContext::from_cursor(
+                    pos.pane.get_cursor_position(),
+                    &config.cursor_trail,
+                )) {
                     // Resepect FPS
                     // TODO: ensure this is the correct method.
                     let now = std::time::Instant::now();
