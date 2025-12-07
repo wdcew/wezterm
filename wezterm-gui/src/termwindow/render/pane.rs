@@ -594,7 +594,9 @@ impl crate::TermWindow {
                     let left_pixel_x =
                         padding_left + border.left.get() as f32 + (pos.left as f32 * cell_width);
 
-                    let trail_color = cursor_border_color.mul_alpha(config.cursor_trail.opacity);
+                    let (r, g, b, _) = cursor_border_color.tuple();
+                    let trail_color =
+                        LinearRgba::with_components(r, g, b, config.cursor_trail.opacity);
 
                     self.cursor_trail
                         .render(
