@@ -8,13 +8,11 @@ pub struct CursorTrailConfig {
     pub enabled: bool,
 
     /// Cursor trail dwell time in milliseconds.
-    /// The trail animation only follows cursors that have stayed in their position
-    /// for longer than this value. This prevents trails during rapid cursor movements.
+    /// Cursor needs to be stationary for this amount of time before the trail will be drawn.
     #[dynamic(default = "default_dwell_threshold")]
     pub dwell_threshold: u64,
 
     /// Animation duration in milliseconds for leading edge corners to reach the cursor.
-    /// Due to exponential easing, corners reach approximately 99.9% of the distance in this time.
     #[dynamic(default = "default_duration")]
     pub duration: u64,
 
@@ -28,7 +26,7 @@ pub struct CursorTrailConfig {
     #[dynamic(default = "default_distance_threshold")]
     pub distance_threshold: usize,
 
-    /// Maximum opacity for cursor trail (0.0 to 1.0)
+    /// Opacity for cursor trail (0.0 to 1.0)
     #[dynamic(default = "default_opacity")]
     pub opacity: f32,
 }
