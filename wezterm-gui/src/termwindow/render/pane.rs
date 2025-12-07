@@ -569,6 +569,56 @@ impl crate::TermWindow {
             if let Some(error) = render.error.take() {
                 return Err(error).context("error while calling with_lines_mut");
             }
+
+            // Update and render cursor trail (if enabled)
+            // TODO: cleaner to move into cursor_trail.rs?
+            if config.cursor_trail.enabled && pos.is_active {
+                let decay_fast = config.cursor_trail.duration as f32 / 1000.0;
+                let decay_slow =
+                    (config.cursor_trail.duration as f32 * config.cursor_trail.spread) / 1000.0;
+
+                if self.cursor_trail.update(
+                    &pos.pane.get_cursor_position(),
+                    config.cursor_trail.distance_threshold as f32,
+                    decay_fast,
+                    decay_slow,
+                    config.cursor_trail.dwell_threshold,
+                ) {
+                    // Resepect FPS
+                    // TODO: ensure this is the correct method.
+                    let now = std::time::Instant::now();
+                    let frame_interval =
+                        std::time::Duration::from_millis(1000 / config.animation_fps as u64);
+                    self.update_next_frame_time(Some(now + frame_interval));
+
+                    let left_pixel_x =
+                        padding_left + border.left.get() as f32 + (pos.left as f32 * cell_width);
+
+                    let trail_color = cursor_border_color.mul_alpha(config.cursor_trail.opacity);
+
+                    self.cursor_trail
+                        .render(
+                            layers,
+                            cell_width,
+                            cell_height,
+                            pos.left,
+                            stable_range.clone(),
+                            (
+                                self.dimensions.pixel_width as f32,
+                                self.dimensions.pixel_height as f32,
+                            ),
+                            (left_pixel_x, top_pixel_y),
+                            trail_color,
+                            if pos.is_active {
+                                None
+                            } else {
+                                Some(config.inactive_pane_hsb)
+                            },
+                            white_space,
+                        )
+                        .context("render cursor trail")?;
+                }
+            }
         }
 
         /*
