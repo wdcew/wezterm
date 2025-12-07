@@ -571,8 +571,6 @@ impl crate::TermWindow {
                 return Err(error).context("error while calling with_lines_mut");
             }
 
-            //self.cursor_trail.update2();
-
             // Update and render cursor trail (if enabled)
             if config.cursor_trail.enabled && pos.is_active {
                 if self.cursor_trail.tick(TickContext::from_cursor(
