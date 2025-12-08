@@ -1,14 +1,8 @@
-use crate::quad::{
-    QuadImpl, QuadTrait, TripleLayerQuadAllocator, TripleLayerQuadAllocatorTrait, V_BOT_LEFT,
-    V_BOT_RIGHT, V_TOP_LEFT, V_TOP_RIGHT,
-};
-use config::{CursorTrailConfig, HsbTransform};
+use crate::quad::{Quad, V_BOT_LEFT, V_BOT_RIGHT, V_TOP_LEFT, V_TOP_RIGHT};
+use config::CursorTrailConfig;
 use mux::renderable::StableCursorPosition;
-use std::ops::Range;
 use std::time::Instant;
 use wezterm_term::StableRowIndex;
-use window::bitmaps::TextureRect;
-use window::color::LinearRgba;
 
 /// Distance threshold for considering corners "at cursor"
 const SETTLED_THRESHOLD: f32 = 0.1;
@@ -250,62 +244,31 @@ impl CursorTrail {
         true
     }
 
-    pub fn render(
+    pub fn apply_to_quad(
         &self,
-        layers: &mut TripleLayerQuadAllocator,
+        quad: &mut Quad,
         cell_width: f32,
         cell_height: f32,
         pane_left: usize,
-        stable_range: Range<StableRowIndex>,
-        window_dimensions: (f32, f32), // (width, height)
-        pixel_offset: (f32, f32),      // (left_pixel_x, top_pixel_y)
-        trail_color: LinearRgba,
-        hsv_transform: Option<HsbTransform>,
-        white_space_texture: TextureRect,
-    ) -> anyhow::Result<()> {
-        let (window_width, window_height) = window_dimensions;
-        let (left_pixel_x, top_pixel_y) = pixel_offset;
-
-        // Convert corner positions from cell coordinates to pixel coordinates
-        let px_x = (window_width / -2.0) + left_pixel_x;
-        let px_y = (window_height / -2.0) + top_pixel_y;
-
-        let pixel_corners = [
-            [
-                px_x + (self.quad[0].x - pane_left as f32) * cell_width,
-                px_y + (self.quad[0].y - stable_range.start as f32) * cell_height,
-            ],
-            [
-                px_x + (self.quad[1].x - pane_left as f32) * cell_width,
-                px_y + (self.quad[1].y - stable_range.start as f32) * cell_height,
-            ],
-            [
-                px_x + (self.quad[3].x - pane_left as f32) * cell_width,
-                px_y + (self.quad[3].y - stable_range.start as f32) * cell_height,
-            ],
-            [
-                px_x + (self.quad[2].x - pane_left as f32) * cell_width,
-                px_y + (self.quad[2].y - stable_range.start as f32) * cell_height,
-            ],
+        pane_top: StableRowIndex,
+        px_x: f32,
+        px_y: f32,
+    ) {
+        quad.vert[V_TOP_LEFT].position = [
+            px_x + (self.quad[0].x - pane_left as f32) * cell_width,
+            px_y + (self.quad[0].y - pane_top as f32) * cell_height,
         ];
-
-        let mut quad_impl = layers.allocate(0)?;
-
-        match &mut quad_impl {
-            QuadImpl::Vert(quad) => {
-                quad.vert[V_TOP_LEFT].position = pixel_corners[0];
-                quad.vert[V_TOP_RIGHT].position = pixel_corners[1];
-                quad.vert[V_BOT_LEFT].position = pixel_corners[2];
-                quad.vert[V_BOT_RIGHT].position = pixel_corners[3];
-            }
-            QuadImpl::Boxed(_) => {}
-        }
-
-        quad_impl.set_hsv(hsv_transform);
-        quad_impl.set_is_background();
-        quad_impl.set_texture(white_space_texture);
-        quad_impl.set_fg_color(trail_color);
-
-        Ok(())
+        quad.vert[V_TOP_RIGHT].position = [
+            px_x + (self.quad[1].x - pane_left as f32) * cell_width,
+            px_y + (self.quad[1].y - pane_top as f32) * cell_height,
+        ];
+        quad.vert[V_BOT_LEFT].position = [
+            px_x + (self.quad[3].x - pane_left as f32) * cell_width,
+            px_y + (self.quad[3].y - pane_top as f32) * cell_height,
+        ];
+        quad.vert[V_BOT_RIGHT].position = [
+            px_x + (self.quad[2].x - pane_left as f32) * cell_width,
+            px_y + (self.quad[2].y - pane_top as f32) * cell_height,
+        ];
     }
 }
