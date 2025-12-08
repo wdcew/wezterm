@@ -54,6 +54,57 @@ impl TrailQuad {
             Pos { x: p.x, y: p.y + 1.0 },
         ])
     }
+
+    fn interp(&mut self, target: &TrailTarget, delta_time: f32, decay_fast: f32, decay_slow: f32) {
+        let target_x = [target.left, target.right, target.right, target.left];
+        let target_y = [target.top, target.top, target.bottom, target.bottom];
+
+        let target_center_x = (target.left + target.right) * 0.5;
+        let target_center_y = (target.top + target.bottom) * 0.5;
+        let target_width = target.right - target.left;
+        let target_height = target.bottom - target.top;
+        let target_diag_2 = (target_width.powi(2) + target_height.powi(2)).sqrt() * 0.5;
+
+        let mut dx = [0.0_f32; 4];
+        let mut dy = [0.0_f32; 4];
+        let mut dot = [0.0_f32; 4];
+
+        for i in 0..4 {
+            dx[i] = target_x[i] - self.0[i].x;
+            dy[i] = target_y[i] - self.0[i].y;
+
+            if dx[i].abs() < 1e-6 && dy[i].abs() < 1e-6 {
+                dx[i] = 0.0;
+                dy[i] = 0.0;
+                dot[i] = 0.0;
+            } else {
+                let norm = (dx[i].powi(2) + dy[i].powi(2)).sqrt();
+                let corner_to_center_x = target_x[i] - target_center_x;
+                let corner_to_center_y = target_y[i] - target_center_y;
+                dot[i] = (dx[i] * corner_to_center_x + dy[i] * corner_to_center_y)
+                    / (target_diag_2 * norm);
+            }
+        }
+
+        let min_dot = dot.iter().cloned().fold(f32::INFINITY, f32::min);
+        let max_dot = dot.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+
+        for i in 0..4 {
+            if (dx[i] == 0.0 && dy[i] == 0.0) || min_dot.is_infinite() {
+                continue;
+            }
+
+            let decay = if (max_dot - min_dot).abs() < 1e-6 {
+                decay_slow
+            } else {
+                decay_slow + (decay_fast - decay_slow) * (dot[i] - min_dot) / (max_dot - min_dot)
+            };
+
+            let step = 1.0 - 2.0_f32.powf(-10.0 * delta_time / decay);
+            self.0[i].x += dx[i] * step;
+            self.0[i].y += dy[i] * step;
+        }
+    }
 }
 
 /// The edges to animate a TrailQuad towards
@@ -161,70 +212,10 @@ impl CursorTrail {
         if target_to_cursor_distance > 0.0 && target_to_cursor_distance <= ctx.distance_threshold {
             self.target = TrailTarget::at(ctx.cursor_pos);
             self.quad = TrailQuad::at(ctx.cursor_pos);
-
             return false;
         }
 
-        // Animate corners towards target using exponential ease-out
-        let target_x = [
-            self.target.left,
-            self.target.right,
-            self.target.right,
-            self.target.left,
-        ];
-        let target_y = [
-            self.target.top,
-            self.target.top,
-            self.target.bottom,
-            self.target.bottom,
-        ];
-
-        let target_center_x = (self.target.left + self.target.right) * 0.5;
-        let target_center_y = (self.target.top + self.target.bottom) * 0.5;
-        let target_width = self.target.right - self.target.left;
-        let target_height = self.target.bottom - self.target.top;
-        let target_diag_2 = (target_width.powi(2) + target_height.powi(2)).sqrt() * 0.5;
-
-        let mut dx = [0.0_f32; 4];
-        let mut dy = [0.0_f32; 4];
-        let mut dot = [0.0_f32; 4];
-
-        for i in 0..4 {
-            dx[i] = target_x[i] - self.quad[i].x;
-            dy[i] = target_y[i] - self.quad[i].y;
-
-            if dx[i].abs() < 1e-6 && dy[i].abs() < 1e-6 {
-                dx[i] = 0.0;
-                dy[i] = 0.0;
-                dot[i] = 0.0;
-            } else {
-                let norm = (dx[i].powi(2) + dy[i].powi(2)).sqrt();
-                let corner_to_center_x = target_x[i] - target_center_x;
-                let corner_to_center_y = target_y[i] - target_center_y;
-                dot[i] = (dx[i] * corner_to_center_x + dy[i] * corner_to_center_y)
-                    / (target_diag_2 * norm);
-            }
-        }
-
-        let min_dot = dot.iter().cloned().fold(f32::INFINITY, f32::min);
-        let max_dot = dot.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-
-        for i in 0..4 {
-            if (dx[i] == 0.0 && dy[i] == 0.0) || min_dot.is_infinite() {
-                continue;
-            }
-
-            let decay = if (max_dot - min_dot).abs() < 1e-6 {
-                ctx.decay_slow
-            } else {
-                ctx.decay_slow
-                    + (ctx.decay_fast - ctx.decay_slow) * (dot[i] - min_dot) / (max_dot - min_dot)
-            };
-
-            let step = 1.0 - 2.0_f32.powf(-10.0 * delta_time / decay);
-            self.quad[i].x += dx[i] * step;
-            self.quad[i].y += dy[i] * step;
-        }
+        self.quad.interp(&self.target, delta_time, ctx.decay_fast, ctx.decay_slow);
 
         let waiting_for_dwell =
             target_to_cursor_distance > ctx.distance_threshold && dwell_time < ctx.dwell_treshold;
