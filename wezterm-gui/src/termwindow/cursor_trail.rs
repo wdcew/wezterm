@@ -49,9 +49,18 @@ impl TrailQuad {
     fn at(p: Pos) -> Self {
         Self([
             Pos { x: p.x, y: p.y },
-            Pos { x: p.x + 1.0, y: p.y },
-            Pos { x: p.x + 1.0, y: p.y + 1.0 },
-            Pos { x: p.x, y: p.y + 1.0 },
+            Pos {
+                x: p.x + 1.0,
+                y: p.y,
+            },
+            Pos {
+                x: p.x + 1.0,
+                y: p.y + 1.0,
+            },
+            Pos {
+                x: p.x,
+                y: p.y + 1.0,
+            },
         ])
     }
 
@@ -193,11 +202,10 @@ impl CursorTrail {
         }
 
         let dwell_time = ctx.now.duration_since(self.cursor_last_moved).as_millis() as u64;
-        // todo: rename to just cursor_distance
-        let target_to_cursor_distance = (ctx.cursor_pos.x - self.target.left).abs()
+        let distance_to_cursor = (ctx.cursor_pos.x - self.target.left).abs()
             + (ctx.cursor_pos.y - self.target.top).abs();
 
-        if dwell_time >= ctx.dwell_treshold && target_to_cursor_distance > ctx.distance_threshold {
+        if dwell_time >= ctx.dwell_treshold && distance_to_cursor > ctx.distance_threshold {
             self.target = TrailTarget::at(ctx.cursor_pos);
         }
 
@@ -209,16 +217,17 @@ impl CursorTrail {
             return false;
         }
 
-        if target_to_cursor_distance > 0.0 && target_to_cursor_distance <= ctx.distance_threshold {
+        if distance_to_cursor > 0.0 && distance_to_cursor <= ctx.distance_threshold {
             self.target = TrailTarget::at(ctx.cursor_pos);
             self.quad = TrailQuad::at(ctx.cursor_pos);
             return false;
         }
 
-        self.quad.interp(&self.target, delta_time, ctx.decay_fast, ctx.decay_slow);
+        self.quad
+            .interp(&self.target, delta_time, ctx.decay_fast, ctx.decay_slow);
 
         let waiting_for_dwell =
-            target_to_cursor_distance > ctx.distance_threshold && dwell_time < ctx.dwell_treshold;
+            distance_to_cursor > ctx.distance_threshold && dwell_time < ctx.dwell_treshold;
         !self.settled(SETTLED_THRESHOLD) || waiting_for_dwell
     }
 
