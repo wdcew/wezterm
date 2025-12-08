@@ -573,10 +573,10 @@ impl crate::TermWindow {
 
             // Update and render cursor trail (if enabled)
             if config.cursor_trail.enabled && pos.is_active {
-                if self.cursor_trail.tick(TickContext::from_cursor(
-                    pos.pane.get_cursor_position(),
-                    &config.cursor_trail,
-                )) {
+                if self
+                    .cursor_trail
+                    .tick(TickContext::from_cursor(cursor, &config.cursor_trail))
+                {
                     // Resepect FPS
                     // TODO: ensure this is the correct method.
                     let now = std::time::Instant::now();
