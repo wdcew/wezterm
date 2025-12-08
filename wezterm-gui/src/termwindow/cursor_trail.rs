@@ -201,21 +201,14 @@ impl CursorTrail {
             self.last_cursor_pos = ctx.cursor_pos;
         }
 
-        let dwell_time = ctx.now.duration_since(self.cursor_last_moved).as_millis() as u64;
-        let distance_to_cursor = (ctx.cursor_pos.x - self.target.left).abs()
-            + (ctx.cursor_pos.y - self.target.top).abs();
-
-        if dwell_time >= ctx.dwell_treshold && distance_to_cursor > ctx.distance_threshold {
-            self.target = TrailTarget::at(ctx.cursor_pos);
-        }
-
-        // first update
-        // TODO: better logic
         if self.target.left == 0.0 && self.target.right == 0.0 {
             self.target = TrailTarget::at(ctx.cursor_pos);
             self.quad = TrailQuad::at(ctx.cursor_pos);
             return false;
         }
+
+        let distance_to_cursor = (ctx.cursor_pos.x - self.target.left).abs()
+            + (ctx.cursor_pos.y - self.target.top).abs();
 
         if distance_to_cursor > 0.0 && distance_to_cursor <= ctx.distance_threshold {
             self.target = TrailTarget::at(ctx.cursor_pos);
@@ -223,12 +216,17 @@ impl CursorTrail {
             return false;
         }
 
+        let dwell_time = ctx.now.duration_since(self.cursor_last_moved).as_millis() as u64;
+        let dwelled = dwell_time >= ctx.dwell_treshold;
+
+        if dwelled {
+            self.target = TrailTarget::at(ctx.cursor_pos);
+        }
+
         self.quad
             .interp(&self.target, delta_time, ctx.decay_fast, ctx.decay_slow);
 
-        let waiting_for_dwell =
-            distance_to_cursor > ctx.distance_threshold && dwell_time < ctx.dwell_treshold;
-        !self.settled(SETTLED_THRESHOLD) || waiting_for_dwell
+        !self.settled(SETTLED_THRESHOLD) || !dwelled
     }
 
     fn settled(&self, threshold: f32) -> bool {

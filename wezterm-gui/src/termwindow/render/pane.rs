@@ -572,47 +572,45 @@ impl crate::TermWindow {
             }
 
             // Update and render cursor trail (if enabled)
-            if config.cursor_trail.enabled && pos.is_active {
-                if self
+            if config.cursor_trail.enabled
+                && pos.is_active
+                && self
                     .cursor_trail
                     .tick(TickContext::from_cursor(cursor, &config.cursor_trail))
-                {
-                    // Resepect FPS
-                    // TODO: ensure this is the correct method.
-                    let now = std::time::Instant::now();
-                    let frame_interval =
-                        std::time::Duration::from_millis(1000 / config.animation_fps as u64);
-                    self.update_next_frame_time(Some(now + frame_interval));
+            {
+                // Resepect FPS
+                // TODO: ensure this is the correct method.
+                let frame_interval =
+                    std::time::Duration::from_millis(1000 / config.animation_fps as u64);
+                self.update_next_frame_time(Some(start + frame_interval));
 
-                    let left_pixel_x =
-                        padding_left + border.left.get() as f32 + (pos.left as f32 * cell_width);
+                let left_pixel_x =
+                    padding_left + border.left.get() as f32 + (pos.left as f32 * cell_width);
 
-                    let (r, g, b, _) = cursor_border_color.tuple();
-                    let trail_color =
-                        LinearRgba::with_components(r, g, b, config.cursor_trail.opacity);
+                let (r, g, b, _) = cursor_border_color.tuple();
+                let trail_color = LinearRgba::with_components(r, g, b, config.cursor_trail.opacity);
 
-                    self.cursor_trail
-                        .render(
-                            layers,
-                            cell_width,
-                            cell_height,
-                            pos.left,
-                            stable_range.clone(),
-                            (
-                                self.dimensions.pixel_width as f32,
-                                self.dimensions.pixel_height as f32,
-                            ),
-                            (left_pixel_x, top_pixel_y),
-                            trail_color,
-                            if pos.is_active {
-                                None
-                            } else {
-                                Some(config.inactive_pane_hsb)
-                            },
-                            white_space,
-                        )
-                        .context("render cursor trail")?;
-                }
+                self.cursor_trail
+                    .render(
+                        layers,
+                        cell_width,
+                        cell_height,
+                        pos.left,
+                        stable_range.clone(),
+                        (
+                            self.dimensions.pixel_width as f32,
+                            self.dimensions.pixel_height as f32,
+                        ),
+                        (left_pixel_x, top_pixel_y),
+                        trail_color,
+                        if pos.is_active {
+                            None
+                        } else {
+                            Some(config.inactive_pane_hsb)
+                        },
+                        white_space,
+                    )
+                    .context("render cursor trail")?;
             }
         }
 
