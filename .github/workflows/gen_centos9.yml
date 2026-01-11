@@ -1,4 +1,4 @@
-name: ubuntu24.04
+name: centos9
 
 on:
   pull_request:
@@ -9,7 +9,7 @@ on:
       - "**/Cargo.lock"
       - "**/Cargo.toml"
       - ".cargo/config.toml"
-      - ".github/workflows/gen_ubuntu24.04.yml"
+      - ".github/workflows/gen_centos9.yml"
       - "assets/fonts/**/*"
       - "assets/icon/*"
       - "assets/open-wezterm-here"
@@ -26,34 +26,31 @@ on:
 jobs:
   build:
     runs-on: "ubuntu-latest"
-    container: "ubuntu:24.04"
+    container: "quay.io/centos/centos:stream9"
     env:
       CARGO_INCREMENTAL: "0"
       SCCACHE_GHA_ENABLED: "true"
       RUSTC_WRAPPER: "sccache"
 
     steps:
-      - name: "set APT to non-interactive"
+      - name: "Install config manager"
         shell: bash
-        run: "echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections"
-      - name: "Update APT"
+        run: "dnf install -y 'dnf-command(config-manager)'"
+      - name: "Enable CRB repo for X bits"
         shell: bash
-        run: "apt update"
+        run: "dnf config-manager --set-enabled crb"
       - name: "Install git"
         shell: bash
-        run: "apt-get install -y git"
-      - name: "Install curl"
+        run: "yum install -y git"
+      - name: "Install curl-minimal"
         shell: bash
-        run: "apt-get install -y curl"
-      - name: "Update APT"
-        shell: bash
-        run: "apt update"
+        run: "yum install -y curl-minimal"
       - name: "Ensure /run/sshd exists"
         shell: bash
         run: "mkdir -p /run/sshd"
       - name: "Install openssh-server"
         shell: bash
-        run: "apt-get install -y openssh-server"
+        run: "yum install -y openssh-server"
       - name: "Workaround git permissions issue"
         shell: bash
         run: "git config --global --add safe.directory /__w/wezterm/wezterm"
@@ -96,17 +93,18 @@ jobs:
         uses: baptiste0928/cargo-install@v3
         with:
           crate: "cargo-nextest"
-          cache-key: "ubuntu24.04"
+          cache-key: "centos9"
       - name: "Test"
         shell: bash
         run: "cargo nextest run --all --no-fail-fast"
       - name: "Package"
         shell: bash
         run: "bash ci/deploy.sh"
+      - name: "Move RPM"
+        shell: bash
+        run: "mv ~/rpmbuild/RPMS/*/*.rpm ."
       - name: "Upload artifact"
         uses: actions/upload-artifact@v4
         with:
-          name: "ubuntu24.04"
-          path: |
-            wezterm-*.deb
-            wezterm-*.xz
+          name: "centos9"
+          path: "wezterm-*.rpm"

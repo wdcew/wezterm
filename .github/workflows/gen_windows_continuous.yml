@@ -1,7 +1,9 @@
-name: windows
+name: windows_continuous
 
 on:
-  pull_request:
+  schedule:
+    - cron: "10 3 * * *"
+  push:
     branches:
       - main
     paths:
@@ -9,7 +11,7 @@ on:
       - "**/Cargo.lock"
       - "**/Cargo.toml"
       - ".cargo/config.toml"
-      - ".github/workflows/gen_windows.yml"
+      - ".github/workflows/gen_windows_continuous.yml"
       - "assets/fonts/**/*"
       - "assets/icon/*"
       - "assets/windows/**/*"
@@ -21,6 +23,7 @@ jobs:
     runs-on: "windows-2022"
     
     env:
+      BUILD_REASON: "Schedule"
       CARGO_INCREMENTAL: "0"
       SCCACHE_GHA_ENABLED: "true"
       RUSTC_WRAPPER: "sccache"
@@ -89,3 +92,29 @@ jobs:
           path: |
             WezTerm-*.zip
             WezTerm-*.exe
+          retention-days: 5
+
+  upload:
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.repository == 'wezterm/wezterm'
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+
+    steps:
+      - name: "checkout repo"
+        uses: actions/checkout@v4
+      - name: "Download artifact"
+        uses: actions/download-artifact@v4
+        with:
+          name: "windows"
+      - name: "Checksum"
+        shell: bash
+        run: "for f in WezTerm-*.zip WezTerm-*.exe ; do sha256sum $f > $f.sha256 ; done"
+      - name: "Upload to Nightly Release"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: "bash ci/retry.sh gh release upload --clobber nightly WezTerm-*.zip WezTerm-*.exe *.sha256"

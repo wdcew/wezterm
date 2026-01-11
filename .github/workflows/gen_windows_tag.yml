@@ -1,20 +1,9 @@
-name: windows
+name: windows_tag
 
 on:
-  pull_request:
-    branches:
-      - main
-    paths:
-      - "**/*.rs"
-      - "**/Cargo.lock"
-      - "**/Cargo.toml"
-      - ".cargo/config.toml"
-      - ".github/workflows/gen_windows.yml"
-      - "assets/fonts/**/*"
-      - "assets/icon/*"
-      - "assets/windows/**/*"
-      - "ci/deploy.sh"
-      - "ci/windows-installer.iss"
+  push:
+    tags:
+      - "20*"
 
 jobs:
   build:
@@ -89,3 +78,53 @@ jobs:
           path: |
             WezTerm-*.zip
             WezTerm-*.exe
+
+  upload:
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.repository == 'wezterm/wezterm'
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+
+    steps:
+      - name: "checkout repo"
+        uses: actions/checkout@v4
+      - name: "Download artifact"
+        uses: actions/download-artifact@v4
+        with:
+          name: "windows"
+      - name: "Checksum"
+        shell: bash
+        run: "for f in WezTerm-*.zip WezTerm-*.exe ; do sha256sum $f > $f.sha256 ; done"
+      - name: "Create pre-release"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: "bash ci/retry.sh bash ci/create-release.sh $(ci/tag-name.sh)"
+      - name: "Upload to Tagged Release"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: "bash ci/retry.sh gh release upload --clobber $(ci/tag-name.sh) WezTerm-*.zip WezTerm-*.exe *.sha256"
+      - name: "Checkout winget-pkgs"
+        uses: actions/checkout@v4
+        with:
+          repository: "wez/winget-pkgs"
+          path: "winget-pkgs"
+          token: "${{ secrets.GH_PAT }}"
+      - name: "Setup email for winget repo"
+        shell: bash
+        run: "cd winget-pkgs && git config user.email wez@wezfurlong.org"
+      - name: "Setup name for winget repo"
+        shell: bash
+        run: "cd winget-pkgs && git config user.name 'Wez Furlong'"
+      - name: "Create winget manifest and push to fork"
+        shell: bash
+        run: "bash ci/make-winget-pr.sh winget-pkgs WezTerm-*.exe"
+      - name: "Submit PR"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+        shell: bash
+        run: 'cd winget-pkgs && gh pr create --fill --body "PR automatically created by release automation in the wezterm repo"'
