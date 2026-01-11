@@ -1,6 +1,7 @@
 name: macos
 
 on:
+  workflow_dispatch:      # 允许手动触发（非常建议添加此项用于测试）
   pull_request:
     branches:
       - main
