@@ -1,10 +1,11 @@
 use crate::client::{ClientId, ClientInfo};
 use crate::pane::{CachePolicy, Pane, PaneId};
+use crate::serial::InputSerial;
 use crate::ssh_agent::AgentProxy;
 use crate::tab::{SplitRequest, Tab, TabId};
 use crate::window::{Window, WindowId};
 use anyhow::{anyhow, Context, Error};
-use config::keyassignment::SpawnTabDomain;
+use config::keyassignment::{RotationDirection, SpawnTabDomain};
 use config::{configuration, ExitBehavior, GuiPosition};
 use domain::{Domain, DomainId, DomainState, SplitSource};
 use filedescriptor::{poll, pollfd, socketpair, AsRawSocketDescriptor, FileDescriptor, POLLIN};
@@ -40,6 +41,7 @@ pub mod domain;
 pub mod localpane;
 pub mod pane;
 pub mod renderable;
+pub mod serial;
 pub mod ssh;
 pub mod ssh_agent;
 pub mod tab;
@@ -81,8 +83,11 @@ pub enum MuxNotification {
         tab_id: TabId,
         window_id: WindowId,
     },
-    PaneFocused(PaneId),
-    TabResized(TabId),
+    PaneFocused {
+        pane_id: PaneId,
+        pane_focus_serial: Option<InputSerial>,
+    },
+    TabReflowed(TabId),
     TabTitleChanged {
         tab_id: TabId,
         title: String,
@@ -113,6 +118,7 @@ pub struct Mux {
     num_panes_by_workspace: RwLock<HashMap<String, usize>>,
     main_thread_id: std::thread::ThreadId,
     agent: Option<AgentProxy>,
+    pane_focus_serial: RwLock<InputSerial>,
 }
 
 const BUFSIZE: usize = 1024 * 1024;
@@ -448,6 +454,7 @@ impl Mux {
             num_panes_by_workspace: RwLock::new(HashMap::new()),
             main_thread_id: std::thread::current().id(),
             agent,
+            pane_focus_serial: RwLock::new(InputSerial::empty()),
         }
     }
 
@@ -528,6 +535,7 @@ impl Mux {
             }
         }
         if let Some(pane) = self.get_pane(pane_id) {
+            Mux::get().increment_pane_focus_serial();
             pane.focus_changed(true);
         }
     }
@@ -1260,7 +1268,7 @@ impl Mux {
             .ok_or_else(|| anyhow::anyhow!("domain {domain_id} of pane {pane_id} not found"))?;
 
         if let Some((tab, window_id)) = domain
-            .move_pane_to_new_tab(pane_id, window_id, workspace_for_new_window.clone())
+            .remote_move_pane_to_new_tab(pane_id, window_id, workspace_for_new_window.clone())
             .await?
         {
             return Ok((tab, window_id));
@@ -1304,6 +1312,71 @@ impl Mux {
         Ok((tab, window_id))
     }
 
+    pub async fn rotate_panes(
+        &self,
+        tab_id: TabId,
+        direction: RotationDirection,
+    ) -> anyhow::Result<()> {
+        let tab = match self.get_tab(tab_id) {
+            Some(tab) => tab,
+            None => anyhow::bail!("Invalid tab id {}", tab_id),
+        };
+
+        // This makes the assumption that a tab contains only panes from a single local domain,
+        // though that is also an assumption that ClientDomain makes when syncing tab panes.
+        let tab_panes = tab.iter_panes();
+        let pos_pane = match tab_panes.iter().nth(0) {
+            Some(pos_pane) => pos_pane,
+            None => anyhow::bail!("Tab contains no panes: {}", tab_id),
+        };
+
+        let pane_id = pos_pane.pane.pane_id();
+        let domain_id = pos_pane.pane.domain_id();
+
+        let domain = self
+            .get_domain(domain_id)
+            .ok_or_else(|| anyhow::anyhow!("domain {domain_id} of tab {tab_id} not found"))?;
+
+        if domain.remote_rotate_panes(pane_id, direction).await? {
+            return Ok(());
+        }
+
+        match direction {
+            RotationDirection::Clockwise => tab.local_rotate_clockwise(),
+            RotationDirection::CounterClockwise => tab.local_rotate_counter_clockwise(),
+        }
+        Ok(())
+    }
+
+    pub async fn swap_active_pane_with_index(
+        &self,
+        active_pane_id: PaneId,
+        with_pane_index: usize,
+        keep_focus: bool,
+    ) -> anyhow::Result<()> {
+        let (domain_id, _window_id, tab_id) = self
+            .resolve_pane_id(active_pane_id)
+            .ok_or_else(|| anyhow::anyhow!("pane {} not found", active_pane_id))?;
+
+        let domain = self.get_domain(domain_id).ok_or_else(|| {
+            anyhow::anyhow!("domain {domain_id} of pane {active_pane_id} not found")
+        })?;
+
+        if domain
+            .remote_swap_active_pane_with_index(active_pane_id, with_pane_index, keep_focus)
+            .await?
+        {
+            return Ok(());
+        }
+
+        let tab = match self.get_tab(tab_id) {
+            Some(tab) => tab,
+            None => anyhow::bail!("Invalid tab id {}", tab_id),
+        };
+
+        tab.local_swap_active_with_index(with_pane_index, keep_focus);
+        Ok(())
+    }
     pub async fn spawn_tab_or_window(
         &self,
         window_id: Option<WindowId>,
@@ -1396,6 +1469,16 @@ impl Mux {
         }
 
         Ok((tab, pane, window_id))
+    }
+
+    pub fn current_pane_focus_serial(&self) -> InputSerial {
+        *self.pane_focus_serial.read()
+    }
+
+    pub fn increment_pane_focus_serial(&self) -> InputSerial {
+        let mut pane_focus_serial = self.pane_focus_serial.write();
+        *pane_focus_serial = InputSerial::now();
+        *pane_focus_serial
     }
 }
 

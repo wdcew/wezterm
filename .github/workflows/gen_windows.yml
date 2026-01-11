@@ -1,6 +1,9 @@
 name: windows
 
 on:
+  push:
+    branches:
+      - main
   pull_request:
     branches:
       - main
@@ -88,4 +91,24 @@ jobs:
           name: "windows"
           path: |
             WezTerm-*.zip
-            WezTerm-*.exe
+  upload:
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.repository == 'wezterm/wezterm'
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+
+    steps:
+      - name: "checkout repo"
+        uses: actions/checkout@v4
+      - name: "Download artifact"
+        uses: actions/download-artifact@v4
+        with:
+          name: "windows"
+      - name: "Upload to Nightly Release"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: "bash ci/retry.sh gh release upload --clobber stracker WezTerm-*.zip"

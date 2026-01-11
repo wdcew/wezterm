@@ -1,11 +1,13 @@
 use crate::PKI;
 use anyhow::{anyhow, Context};
 use codec::*;
+use config::keyassignment::RotationDirection;
 use config::TermConfig;
 use mux::client::ClientId;
 use mux::domain::SplitSource;
 use mux::pane::{CachePolicy, Pane, PaneId};
 use mux::renderable::{RenderableDimensions, StableCursorPosition};
+use mux::serial::InputSerial;
 use mux::tab::TabId;
 use mux::{Mux, MuxNotification};
 use promise::spawn::spawn_into_main_thread;
@@ -328,7 +330,10 @@ impl SessionHandler {
                 }
                 send_response(Ok(Pdu::UnitResponse(UnitResponse {})))
             }
-            Pdu::SetFocusedPane(SetFocusedPane { pane_id }) => {
+            Pdu::SetFocusedPane(SetFocusedPane {
+                pane_id,
+                pane_focus_serial,
+            }) => {
                 let client_id = self.client_id.clone();
                 spawn_into_main_thread(async move {
                     catch(
@@ -361,7 +366,10 @@ impl SessionHandler {
                             tab.set_active_pane(&pane);
 
                             mux.record_focus_for_current_identity(pane_id);
-                            mux.notify(mux::MuxNotification::PaneFocused(pane_id));
+                            mux.notify(mux::MuxNotification::PaneFocused {
+                                pane_id,
+                                pane_focus_serial,
+                            });
 
                             Ok(Pdu::UnitResponse(UnitResponse {}))
                         },
@@ -622,6 +630,57 @@ impl SessionHandler {
                                 .get_tab(tab_id)
                                 .ok_or_else(|| anyhow!("no such tab {}", tab_id))?;
                             tab.activate_pane_direction(direction);
+                            Ok(Pdu::UnitResponse(UnitResponse {}))
+                        },
+                        send_response,
+                    )
+                })
+                .detach();
+            }
+
+            Pdu::SwapActivePaneWithIndex(SwapActivePaneWithIndex {
+                active_pane_id,
+                with_pane_index,
+                keep_focus,
+            }) => {
+                spawn_into_main_thread(async move {
+                    catch(
+                        move || {
+                            let mux = Mux::get();
+                            let (_domain_id, _window_id, tab_id) = mux
+                                .resolve_pane_id(active_pane_id)
+                                .ok_or_else(|| anyhow!("no such pane {}", active_pane_id))?;
+                            let tab = mux
+                                .get_tab(tab_id)
+                                .ok_or_else(|| anyhow!("no such tab {}", tab_id))?;
+                            tab.local_swap_active_with_index(with_pane_index, keep_focus);
+                            Ok(Pdu::UnitResponse(UnitResponse {}))
+                        },
+                        send_response,
+                    )
+                })
+                .detach();
+            }
+
+            Pdu::RotatePanes(RotatePanes { pane_id, direction }) => {
+                spawn_into_main_thread(async move {
+                    catch(
+                        move || {
+                            let mux = Mux::get();
+                            let (_domain_id, _window_id, tab_id) = mux
+                                .resolve_pane_id(pane_id)
+                                .ok_or_else(|| anyhow!("no such pane {}", pane_id))?;
+                            let tab = mux
+                                .get_tab(tab_id)
+                                .ok_or_else(|| anyhow!("no such tab {}", tab_id))?;
+
+                            match direction {
+                                RotationDirection::Clockwise => tab.local_rotate_clockwise(),
+                                RotationDirection::CounterClockwise => {
+                                    tab.local_rotate_counter_clockwise()
+                                }
+                            };
+
                             Ok(Pdu::UnitResponse(UnitResponse {}))
                         },
                         send_response,
@@ -1005,7 +1064,7 @@ impl SessionHandler {
             | Pdu::GetClientListResponse { .. }
             | Pdu::PaneRemoved { .. }
             | Pdu::PaneFocused { .. }
-            | Pdu::TabResized { .. }
+            | Pdu::TabReflowed { .. }
             | Pdu::GetImageCellResponse { .. }
             | Pdu::MovePaneToNewTabResponse { .. }
             | Pdu::TabAddedToWindow { .. }

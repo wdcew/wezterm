@@ -102,13 +102,8 @@ case $OSTYPE in
     ;;
   msys)
     zipdir=WezTerm-windows-$TAG_NAME
-    if [[ "$BUILD_REASON" == "Schedule" ]] ; then
-      zipname=WezTerm-windows-nightly.zip
-      instname=WezTerm-nightly-setup
-    else
-      zipname=$zipdir.zip
-      instname=WezTerm-${TAG_NAME}-setup
-    fi
+    zipname=WezTerm-windows-nightly.zip
+    instname=WezTerm-nightly-setup
     rm -rf $zipdir $zipname
     mkdir $zipdir
     cp $TARGET_DIR/release/wezterm.exe \
@@ -125,7 +120,6 @@ case $OSTYPE in
     cp $TARGET_DIR/release/mesa/opengl32.dll \
         $zipdir/mesa
     7z a -tzip $zipname $zipdir
-    iscc.exe -DMyAppVersion=${TAG_NAME#nightly} -F${instname} ci/windows-installer.iss
     ;;
   linux-gnu|linux)
     distro=$(lsb_release -is 2>/dev/null || sh -c "source /etc/os-release && echo \$NAME")
@@ -357,11 +351,7 @@ EOF
         install -Dm644 assets/shell-completion/zsh pkg/debian/usr/share/zsh/functions/Completion/Unix/_wezterm
         install -Dm644 assets/shell-integration/* -t pkg/debian/etc/profile.d
 
-        if [[ "$BUILD_REASON" == "Schedule" ]] ; then
-          debname=wezterm-nightly.$distro$distver
-        else
-          debname=wezterm-$TAG_NAME.$distro$distver
-        fi
+        debname=wezterm-nightly.$distro$distver
         arch=$(dpkg-architecture -q DEB_BUILD_ARCH_CPU)
         case $arch in
           amd64)
@@ -370,12 +360,6 @@ EOF
             debname="${debname}.${arch}"
             ;;
         esac
-
-        fakeroot dpkg-deb --build pkg/debian $debname.deb
-
-        if [[ "$BUILD_REASON" != '' ]] ; then
-          $SUDO apt-get install ./$debname.deb
-        fi
 
         mv pkg/debian pkg/wezterm
         tar cJf $debname.tar.xz -C pkg wezterm

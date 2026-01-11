@@ -77,7 +77,7 @@ impl GuiFrontEnd {
                     })
                     .detach();
                 }
-                MuxNotification::PaneFocused(pane_id) => {
+                MuxNotification::PaneFocused { pane_id, .. } => {
                     promise::spawn::spawn_into_main_thread(async move {
                         let mux = Mux::get();
                         if let Err(err) = mux.focus_pane_and_containing_tab(pane_id) {
@@ -88,7 +88,7 @@ impl GuiFrontEnd {
                 }
                 MuxNotification::TabTitleChanged { .. } => {}
                 MuxNotification::WindowTitleChanged { .. } => {}
-                MuxNotification::TabResized(_) => {}
+                MuxNotification::TabReflowed(_) => {}
                 MuxNotification::TabAddedToWindow { .. } => {}
                 MuxNotification::PaneRemoved(_) => {}
                 MuxNotification::WindowInvalidated(_) => {}
