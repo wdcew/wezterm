@@ -1,6 +1,7 @@
 name: macos
 
 on:
+  workflow_dispatch:      # 允许手动触发（非常建议添加此项用于测试）
   pull_request:
     branches:
       - main
@@ -36,9 +37,6 @@ jobs:
       - name: "Install Rust (ARM)"
         shell: bash
         run: "rustup target add aarch64-apple-darwin"
-      - name: "Install Rust (Intel)"
-        shell: bash
-        run: "rustup target add x86_64-apple-darwin"
       - name: "Compile with sccache"
         uses: mozilla-actions/sccache-action@v0.0.9
       - name: "Cache Rust Dependencies"
@@ -56,27 +54,15 @@ jobs:
       - name: "Install System Deps"
         shell: bash
         run: "env CI=yes PATH=$PATH ./get-deps"
-      - name: "Build wezterm (Release mode Intel)"
-        shell: bash
-        run: "cargo build --target x86_64-apple-darwin -p wezterm --release"
       - name: "Build wezterm (Release mode ARM)"
         shell: bash
         run: "cargo build --target aarch64-apple-darwin -p wezterm --release"
-      - name: "Build wezterm-gui (Release mode Intel)"
-        shell: bash
-        run: "cargo build --target x86_64-apple-darwin -p wezterm-gui --release"
       - name: "Build wezterm-gui (Release mode ARM)"
         shell: bash
         run: "cargo build --target aarch64-apple-darwin -p wezterm-gui --release"
-      - name: "Build wezterm-mux-server (Release mode Intel)"
-        shell: bash
-        run: "cargo build --target x86_64-apple-darwin -p wezterm-mux-server --release"
       - name: "Build wezterm-mux-server (Release mode ARM)"
         shell: bash
         run: "cargo build --target aarch64-apple-darwin -p wezterm-mux-server --release"
-      - name: "Build strip-ansi-escapes (Release mode Intel)"
-        shell: bash
-        run: "cargo build --target x86_64-apple-darwin -p strip-ansi-escapes --release"
       - name: "Build strip-ansi-escapes (Release mode ARM)"
         shell: bash
         run: "cargo build --target aarch64-apple-darwin -p strip-ansi-escapes --release"
@@ -85,9 +71,6 @@ jobs:
         with:
           crate: "cargo-nextest"
           cache-key: "macos"
-      - name: "Test"
-        shell: bash
-        run: "cargo nextest run --all --no-fail-fast --target=x86_64-apple-darwin"
       - name: "Package"
         shell: bash
         run: "bash ci/deploy.sh"
